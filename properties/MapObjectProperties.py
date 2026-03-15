@@ -14,13 +14,20 @@ def on_update_map_obj_props(self, context):
             tm_props.PT_map_object.object_item_animphaseoffset = obj.tm_map_object_animphaseoffset
             tm_props.PT_map_object.object_item_difficultycolor = obj.tm_map_object_difficultycolor
             tm_props.PT_map_object.object_item_lightmapquality = obj.tm_map_object_lightmapquality
+            # populate source collection from collection instance Empties
+            if obj.type == 'EMPTY' and obj.instance_type == 'COLLECTION' and obj.instance_collection:
+                tm_props.PT_map_object.object_source_collection = obj.instance_collection
+            else:
+                tm_props.PT_map_object.object_source_collection = None
         else:
             if tm_props.PT_map_object.object_type == MAP_OBJECT_BLOCK:
                 tm_props.PT_map_object.object_path = ""
             else:
                 tm_props.PT_map_object.object_path = get_obj_potential_item_path(obj)
+            tm_props.PT_map_object.object_source_collection = None
     else:
         tm_props.PT_map_object.object_path = ""
+        tm_props.PT_map_object.object_source_collection = None
 
 def on_update_map_obj_kind(self, context):
     tm_props = get_global_props()

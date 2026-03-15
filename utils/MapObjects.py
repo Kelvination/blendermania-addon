@@ -116,6 +116,10 @@ def create_update_map_object():
             obj.tm_map_object_animphaseoffset = object_item_animphaseoffset
             obj.tm_map_object_difficultycolor = object_item_difficultycolor
             obj.tm_map_object_lightmapquality = object_item_lightmapquality
+            # update collection instance reference if source collection changed
+            if source_coll and obj.type == 'EMPTY':
+                obj.instance_type = 'COLLECTION'
+                obj.instance_collection = source_coll
         set_active_object(object_item)
 
     elif len(selected_objects) > 1:
@@ -126,12 +130,35 @@ def create_update_map_object():
             obj.tm_map_object_animphaseoffset = object_item_animphaseoffset
             obj.tm_map_object_difficultycolor = object_item_difficultycolor
             obj.tm_map_object_lightmapquality = object_item_lightmapquality
+            # update collection instance reference if source collection changed
+            if source_coll and obj.type == 'EMPTY':
+                obj.instance_type = 'COLLECTION'
+                obj.instance_collection = source_coll
 
         set_active_object(object_item)
     else:
         # update object if it's already map_object else create a new one
         if object_item and object_item.tm_map_object_kind:
             obj_to_update = object_item
+            # update collection instance reference if source collection changed
+            if source_coll:
+                if obj_to_update.type == 'EMPTY':
+                    obj_to_update.instance_type = 'COLLECTION'
+                    obj_to_update.instance_collection = source_coll
+                else:
+                    # replace mesh placeholder with a collection instance Empty
+                    loc = obj_to_update.location.copy()
+                    rot = obj_to_update.rotation_euler.copy()
+                    old_obj = obj_to_update
+                    empty = bpy.data.objects.new(name="", object_data=None)
+                    empty.instance_type = 'COLLECTION'
+                    empty.instance_collection = source_coll
+                    empty.location = loc
+                    empty.rotation_euler = rot
+                    move_obj_to_coll(empty, map_coll)
+                    # remove old placeholder
+                    bpy.data.objects.remove(old_obj, do_unlink=True)
+                    obj_to_update = empty
         else:
             if source_coll:
                 # create a collection instance (Empty) that visually shows the source collection
@@ -167,20 +194,7 @@ def validate_map_collection() -> str:
     for obj in map_coll.all_objects:
         obj:bpy.types.Object = obj
 
-        # Collection instance Empties: validate they have required properties
-        if obj.type == 'EMPTY' and obj.instance_type == 'COLLECTION' and obj.instance_collection:
-            if not obj.tm_map_object_kind or not obj.tm_map_object_path:
-                return f"Collection instance '{obj.name}' is missing Item path. Set the item path before exporting."
-            # Warn about non-unit scale (scale is not exported)
-            scale = obj.scale
-            if abs(scale[0] - 1.0) > 0.001 or abs(scale[1] - 1.0) > 0.001 or abs(scale[2] - 1.0) > 0.001:
-                return f"Collection instance '{obj.name}' has non-unit scale which will be ignored on export. Apply or reset scale."
-            if obj.tm_map_object_kind == MAP_OBJECT_ITEM:
-                if doc_path in obj.tm_map_object_path and not is_file_existing(obj.tm_map_object_path):
-                    return f"Item with path: {obj.tm_map_object_path} does not exist. Object name: {obj.name}"
-            continue
-
-        # Objects with Geometry Nodes: validate they are items (not blocks)
+        # Objects with Geometry Nodes: validate first (takes priority over collection instances)
         if _has_geonodes_modifier(obj):
             if obj.tm_map_object_kind == MAP_OBJECT_BLOCK:
                 return f"Blocks are not supported via Geometry Nodes. Object: {obj.name}"
@@ -190,6 +204,18 @@ def validate_map_collection() -> str:
                 if doc_path in obj.tm_map_object_path and not is_file_existing(obj.tm_map_object_path):
                     return f"Item with path: {obj.tm_map_object_path} does not exist. Object name: {obj.name}"
                 continue
+
+        # Collection instance Empties: validate they have required properties
+        if obj.type == 'EMPTY' and obj.instance_type == 'COLLECTION' and obj.instance_collection:
+            if not obj.tm_map_object_kind or not obj.tm_map_object_path:
+                return f"Collection instance '{obj.name}' is missing Item path. Set the item path before exporting."
+            scale = obj.scale
+            if abs(scale[0] - 1.0) > 0.001 or abs(scale[1] - 1.0) > 0.001 or abs(scale[2] - 1.0) > 0.001:
+                return f"Collection instance '{obj.name}' has non-unit scale which will be ignored on export. Apply or reset scale."
+            if obj.tm_map_object_kind == MAP_OBJECT_ITEM:
+                if doc_path in obj.tm_map_object_path and not is_file_existing(obj.tm_map_object_path):
+                    return f"Item with path: {obj.tm_map_object_path} does not exist. Object name: {obj.name}"
+            continue
 
         if not obj.tm_map_object_kind or not obj.tm_map_object_path:
             return f"Map collection contains invalid object: {obj.name}"
@@ -255,7 +281,7 @@ def _collect_geonodes_instances(obj: bpy.types.Object, depsgraph) -> list:
 
 def _has_geonodes_modifier(obj: bpy.types.Object) -> bool:
     """Check if an object has any Geometry Nodes modifiers."""
-    return any(m.type == 'NODES' for m in obj.modifiers)
+    return len(obj.modifiers) > 0 and any(m.type == 'NODES' for m in obj.modifiers)
 
 
 def export_map_collection() -> DotnetExecResult:
@@ -282,19 +308,19 @@ def export_map_collection() -> DotnetExecResult:
     for obj in map_coll.all_objects:
         obj:bpy.types.Object = obj
 
-        # Handle collection instance Empties
-        if obj.type == 'EMPTY' and obj.instance_type == 'COLLECTION' and obj.instance_collection:
-            if obj.tm_map_object_kind == MAP_OBJECT_ITEM:
-                dotnet_items.append(_create_dotnet_item_from_obj(obj, doc_path))
-            continue
-
-        # Handle Geometry Nodes instances
+        # Handle Geometry Nodes instances (check first — takes priority over collection instances)
         if _has_geonodes_modifier(obj) and obj.tm_map_object_kind == MAP_OBJECT_ITEM:
             instances = _collect_geonodes_instances(obj, depsgraph)
             if instances:
                 for pos, rot in instances:
                     dotnet_items.append(_create_dotnet_item_from_obj(obj, doc_path, loc=pos, rot=rot))
                 continue  # skip parent object, only export instances
+
+        # Handle collection instance Empties
+        if obj.type == 'EMPTY' and obj.instance_type == 'COLLECTION' and obj.instance_collection:
+            if obj.tm_map_object_kind == MAP_OBJECT_ITEM:
+                dotnet_items.append(_create_dotnet_item_from_obj(obj, doc_path))
+            continue
 
         if obj.tm_map_object_kind == MAP_OBJECT_ITEM:
             dotnet_items.append(_create_dotnet_item_from_obj(obj, doc_path))
