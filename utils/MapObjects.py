@@ -116,6 +116,10 @@ def create_update_map_object():
             obj.tm_map_object_animphaseoffset = object_item_animphaseoffset
             obj.tm_map_object_difficultycolor = object_item_difficultycolor
             obj.tm_map_object_lightmapquality = object_item_lightmapquality
+            # update collection instance reference if source collection changed
+            if source_coll and obj.type == 'EMPTY':
+                obj.instance_type = 'COLLECTION'
+                obj.instance_collection = source_coll
         set_active_object(object_item)
 
     elif len(selected_objects) > 1:
@@ -126,12 +130,35 @@ def create_update_map_object():
             obj.tm_map_object_animphaseoffset = object_item_animphaseoffset
             obj.tm_map_object_difficultycolor = object_item_difficultycolor
             obj.tm_map_object_lightmapquality = object_item_lightmapquality
+            # update collection instance reference if source collection changed
+            if source_coll and obj.type == 'EMPTY':
+                obj.instance_type = 'COLLECTION'
+                obj.instance_collection = source_coll
 
         set_active_object(object_item)
     else:
         # update object if it's already map_object else create a new one
         if object_item and object_item.tm_map_object_kind:
             obj_to_update = object_item
+            # update collection instance reference if source collection changed
+            if source_coll:
+                if obj_to_update.type == 'EMPTY':
+                    obj_to_update.instance_type = 'COLLECTION'
+                    obj_to_update.instance_collection = source_coll
+                else:
+                    # replace mesh placeholder with a collection instance Empty
+                    loc = obj_to_update.location.copy()
+                    rot = obj_to_update.rotation_euler.copy()
+                    old_obj = obj_to_update
+                    empty = bpy.data.objects.new(name="", object_data=None)
+                    empty.instance_type = 'COLLECTION'
+                    empty.instance_collection = source_coll
+                    empty.location = loc
+                    empty.rotation_euler = rot
+                    move_obj_to_coll(empty, map_coll)
+                    # remove old placeholder
+                    bpy.data.objects.remove(old_obj, do_unlink=True)
+                    obj_to_update = empty
         else:
             if source_coll:
                 # create a collection instance (Empty) that visually shows the source collection
