@@ -55,6 +55,7 @@ from ..utils.Functions import (
     is_game_maniaplanet,
 )
 from .SetIcon import set_icon
+from .KinematicConvert import convert_to_kinematic_if_needed
 
 
 def _build_nadeo_importer_command(command_type: str, filepath: str) -> tuple:
@@ -161,8 +162,10 @@ class ConvertResult():
 
 
 class ItemConvert(threading.Thread):
-    def __init__(self, fbxfilepath: str, game: str, physic_hack=True, icon_path: str="") -> None:
+    def __init__(self, fbxfilepath: str, game: str, physic_hack=True, icon_path: str="", collection=None) -> None:
         super(ItemConvert, self).__init__() #need to call init from Thread, otherwise error
+
+        self.collection = collection
         
         
         # relative (Items/...) & absolute (C:/Users...) fbx filepaths
@@ -244,8 +247,11 @@ class ItemConvert(threading.Thread):
                 and tm_props.ST_nadeoImporter_TM_current in NADEO_IMPORTER_ICON_OVERWRITE_VERSION
             ):
                 self.overwrite_icon_item_gbx()
-            
-        
+
+            if not self.convert_has_failed:
+                self.convert_to_kinematic()
+
+
         # maniaplanet convert process
         if self.game_is_maniaplanet:
             self.convert_mesh_and_shape_gbx() 
@@ -284,14 +290,29 @@ class ItemConvert(threading.Thread):
 
 
     def pascalcase_gbx_filenames(self) -> None:
-        try:   os.rename(self.gbx_item_filepath  , re.sub(r"item\.gbx$",  "Item.Gbx",  self.gbx_item_filepath  , flags=re.IGNORECASE))
-        except FileNotFoundError: pass
-        try:   os.rename(self.gbx_mesh_filepath  , re.sub(r"mesh\.gbx$",  "Mesh.Gbx",  self.gbx_mesh_filepath  , flags=re.IGNORECASE))
-        except FileNotFoundError: pass
-        try:   os.rename(self.gbx_shape_filepath , re.sub(r"shape\.gbx$", "Shape.Gbx", self.gbx_shape_filepath , flags=re.IGNORECASE))
-        except FileNotFoundError: pass
-        try:   os.rename(self.gbx_trigger_filepath , re.sub(r"trigger\.shape\.gbx$", "Trigger.Shape.Gbx", self.gbx_trigger_filepath , flags=re.IGNORECASE))
-        except FileNotFoundError: pass
+        """Rename GBX files from lowercase (Wine output) to PascalCase (Trackmania expected).
+
+        NadeoImporter via Wine outputs lowercase extensions (.item.gbx) but the
+        path variables are constructed with PascalCase (.Item.Gbx). A naive
+        os.rename(same, same) is a no-op on case-insensitive filesystems, so we
+        discover the actual filename on disk and rename from that.
+        """
+        targets = [
+            self.gbx_item_filepath,
+            self.gbx_mesh_filepath,
+            self.gbx_shape_filepath,
+            self.gbx_trigger_filepath,
+        ]
+        for target_path in targets:
+            dirpath = os.path.dirname(target_path)
+            target_name = os.path.basename(target_path)
+            try:
+                for entry in os.listdir(dirpath):
+                    if entry.lower() == target_name.lower() and entry != target_name:
+                        os.rename(os.path.join(dirpath, entry), target_path)
+                        break
+            except (FileNotFoundError, OSError):
+                pass
     
 
     def convert_mesh_and_shape_gbx(self) -> None:
@@ -442,6 +463,11 @@ class ItemConvert(threading.Thread):
             self.add_progress_step(f"""Overwrite icon .Item.gbx successfully""")
         else:
             self.add_progress_step(f"""Overwrite icon .Item.gbx failed""")
+
+
+    def convert_to_kinematic(self) -> None:
+        """Convert static item to kinematic (moving) if collection has tm_kinematic_enabled"""
+        convert_to_kinematic_if_needed(self)
 
 
     def get_item_embed_size(self):
@@ -921,7 +947,7 @@ def convert_fbx(item: ExportedItem) -> None:
     current_convert_timer = Timer()
     current_convert_timer.start()
     
-    conversion = ItemConvert(fbxfilepath=item.fbx_path, game=item.game, physic_hack=item.physic_hack, icon_path=item.icon_path)
+    conversion = ItemConvert(fbxfilepath=item.fbx_path, game=item.game, physic_hack=item.physic_hack, icon_path=item.icon_path, collection=item.collection)
     conversion.start() #start the convert (call internal run())
     conversion.join()  #waits until the thread terminated (function/convert is done..)
     

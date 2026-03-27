@@ -17,6 +17,7 @@ from ..operators.OT_Map_Manipulate import (
 from ..utils.Functions import (
     draw_nadeoini_required_message,
     get_global_props,
+    has_native_dotnet,
     is_blendermania_dotnet_installed,
     is_dotnet_runtime_installed_in_wine,
     is_game_maniaplanet,
@@ -113,8 +114,8 @@ class PT_UIMapExport(bpy.types.Panel):
         has_map_file = len(tm_props.ST_map_filepath) != 0
         has_map_coll = tm_props.PT_map_collection is not None
 
-        # Platform check - map export requires Windows OR Wine on Mac
-        if sys.platform != 'win32' and not tm_props.CB_useWineForConversion:
+        # Platform check - map export requires Windows, native binary, OR Wine on Mac
+        if sys.platform != 'win32' and not has_native_dotnet() and not tm_props.CB_useWineForConversion:
             box = layout.box()
             box.alert = True
             col = box.column(align=True)
@@ -123,8 +124,8 @@ class PT_UIMapExport(bpy.types.Panel):
             col.label(text="Enable Wine in Settings > NadeoImporter")
             return
 
-        # Check for .NET runtime on Mac with Wine
-        if sys.platform != 'win32' and tm_props.CB_useWineForConversion:
+        # Check for .NET runtime on Mac with Wine (skip if using native binary)
+        if sys.platform != 'win32' and not has_native_dotnet() and tm_props.CB_useWineForConversion:
             if not is_dotnet_runtime_installed_in_wine():
                 box = layout.box()
                 box.alert = True
@@ -186,7 +187,25 @@ class PT_UIMapExport(bpy.types.Panel):
         col_sub_middle = row_right.column(align=True)
         col_sub_middle.enabled = True
         col_sub_middle.prop(tm_props, "CB_map_clean_items", text="Items", toggle=True)
-        
+
+        # Void Base (GrassRemover)
+        layout.separator(factor=0.5)
+        row = layout.row(align=True)
+        row.prop(tm_props, "CB_map_void_base", text="Void Base (Remove Grass)", toggle=True, icon="WORLD")
+
+        # Map Size (optional)
+        layout.separator(factor=0.5)
+        size_row = layout.row(align=True)
+        size_row.label(text="Map Size")
+        size_vals = layout.row(align=True)
+        size_vals.prop(tm_props, "NU_map_size_x", text="X")
+        size_vals.prop(tm_props, "NU_map_size_y", text="Y")
+        size_vals.prop(tm_props, "NU_map_size_z", text="Z")
+        if tm_props.NU_map_size_x == 0 and tm_props.NU_map_size_y == 0 and tm_props.NU_map_size_z == 0:
+            hint = layout.row()
+            hint.scale_y = 0.6
+            hint.label(text="(0 = keep original size)")
+
         row = layout.row(align=True)
         row.scale_y = 1.5
         row.enabled = has_map_file and has_map_coll

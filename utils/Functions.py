@@ -64,22 +64,49 @@ def get_addon_assets_addons_path() -> str:
 def get_addon_assets_blendfiles_path() -> str:
     return get_addon_assets_path() + "/blends/"
 
+def has_native_dotnet() -> bool:
+    """Check if a native macOS dotnet binary is available (no Wine needed)."""
+    import platform
+    if sys.platform != 'darwin' or platform.machine() != 'arm64':
+        return False
+    return os.path.isfile(get_addon_path() + "assets/blendermania-dotnet-osx-arm64")
+
 def get_blendermania_dotnet_path() -> str:
-    from .Constants import BLENDER_INSTANCE_IS_DEV
-    #if BLENDER_INSTANCE_IS_DEV:
-    #    return fr"D:\Art\Blender\blendermania-dotnet\blendermania-dotnet\bin\Release\net7.0\win-x64\publish\blendermania-dotnet.exe"
-    #else:
+    if sys.platform == 'darwin':
+        native_path = get_addon_path() + "assets/blendermania-dotnet-osx-arm64"
+        if os.path.isfile(native_path):
+            return native_path
     return get_addon_path() + f"assets/{BLENDERMANIA_DOTNET}.exe"
+
+_dotnet_installed_cache = {"result": None, "timestamp": 0.0}
+_dotnet_wine_cache = {"result": None, "timestamp": 0.0}
+_CACHE_TTL = 30.0
+
+def invalidate_dotnet_caches():
+    _dotnet_installed_cache["result"] = None
+    _dotnet_wine_cache["result"] = None
 
 def is_blendermania_dotnet_installed() -> bool:
     """Check if Blendermania_Dotnet.exe can be run - either native Windows or via Wine on Mac"""
+    import time
+    cache = _dotnet_installed_cache
+    now = time.monotonic()
+    if cache["result"] is not None and (now - cache["timestamp"]) < _CACHE_TTL:
+        return cache["result"]
+
     exe_exists = is_file_existing(get_blendermania_dotnet_path())
     if sys.platform == 'win32':
-        return exe_exists
+        result = exe_exists
+    elif has_native_dotnet():
+        result = exe_exists
     else:
-        # On Mac/Linux, need exe AND Wine configured
+        # On Mac/Linux without native binary, need exe AND Wine configured
         tm_props = get_global_props()
-        return exe_exists and tm_props.CB_useWineForConversion
+        result = exe_exists and tm_props.CB_useWineForConversion
+
+    cache["result"] = result
+    cache["timestamp"] = now
+    return result
 
 
 def is_dotnet_runtime_installed_in_wine() -> bool:
@@ -88,31 +115,42 @@ def is_dotnet_runtime_installed_in_wine() -> bool:
     if sys.platform == 'win32' or not tm_props.CB_useWineForConversion:
         return True  # Not relevant on Windows
 
+    import time
+    cache = _dotnet_wine_cache
+    now = time.monotonic()
+    if cache["result"] is not None and (now - cache["timestamp"]) < _CACHE_TTL:
+        return cache["result"]
+
     wine_path = tm_props.ST_wineExePath
     bottle_name = tm_props.ST_wineBottleName
 
     try:
         if not os.path.isfile(wine_path):
             debug(f"Wine executable not found at {wine_path}")
-            return False
-
-        if tm_props.LI_wineType == "CROSSOVER":
+            result = False
+        elif tm_props.LI_wineType == "CROSSOVER":
             cmd = [wine_path, "--bottle", bottle_name, "dotnet", "--list-runtimes"]
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            output = proc.stdout + proc.stderr
+            result = "Microsoft.NETCore.App 7." in output or "Microsoft.NETCore.App 8." in output
         else:
             cmd = [wine_path, "dotnet", "--list-runtimes"]
-
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        output = result.stdout + result.stderr
-        return "Microsoft.NETCore.App 7." in output or "Microsoft.NETCore.App 8." in output
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            output = proc.stdout + proc.stderr
+            result = "Microsoft.NETCore.App 7." in output or "Microsoft.NETCore.App 8." in output
     except subprocess.TimeoutExpired:
         debug("Wine timed out checking .NET runtime")
-        return False
+        result = False
     except FileNotFoundError:
         debug(f"Wine executable not found at {wine_path}")
-        return False
+        result = False
     except Exception as e:
         debug(f"Failed to check .NET runtime in Wine: {e}")
-        return False
+        result = False
+
+    cache["result"] = result
+    cache["timestamp"] = now
+    return result
 
 
 def install_dotnet_runtime_in_wine() -> tuple[bool, str]:

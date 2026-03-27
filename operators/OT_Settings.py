@@ -101,10 +101,16 @@ class TM_OT_Settings_ReloadAddon(Operator):
     bl_label = "Reload Addon"
 
     def execute(self, context):
+        import sys
         addon_module = __package__.split(".")[0]
+
         def _reload():
             try:
                 bpy.ops.preferences.addon_disable(module=addon_module)
+                # Remove all cached submodules so they get re-imported fresh
+                to_remove = [key for key in sys.modules if key.startswith(addon_module)]
+                for key in to_remove:
+                    del sys.modules[key]
                 bpy.ops.preferences.addon_enable(module=addon_module)
             except Exception as error:
                 show_report_popup("Reload failed", [str(error)], "ERROR")
@@ -171,6 +177,8 @@ class TM_OT_Settings_InstallBlendermaniaDotnet(Operator):
 
     def execute(self, context):
         install_blendermania_dotnet()
+        from ..utils.Functions import invalidate_dotnet_caches
+        invalidate_dotnet_caches()
         return {"FINISHED"}
 
 
@@ -181,8 +189,9 @@ class TM_OT_Settings_InstallDotnetInWine(Operator):
     bl_label = "Install .NET 7 in Wine"
 
     def execute(self, context):
-        from ..utils.Functions import install_dotnet_runtime_in_wine
+        from ..utils.Functions import install_dotnet_runtime_in_wine, invalidate_dotnet_caches
         success, message = install_dotnet_runtime_in_wine()
+        invalidate_dotnet_caches()
         if success:
             show_report_popup("Success", [message], "INFO")
         else:

@@ -2,7 +2,7 @@ import bpy
 from bpy.props import * 
 from bpy.types import PropertyGroup
 
-class ExportedItem: 
+class ExportedItem:
     name:                   str  = ""
     name_raw:               str  = ""
     r_path:                 str  = "" # relative path in Items/ folder or Work/Items w/o extension
@@ -10,6 +10,8 @@ class ExportedItem:
     icon_path:              str  = ""
     fbx_path:               str  = ""
     objects:                list[bpy.types.Object] = None
+    collection:             object = None  # bpy.types.Collection reference for kinematic/etc
+    cached_materials:       list = None  # snapshot of materials for XML generation after object cleanup
     color_tag:              str  = ""
     tm_itemxml_template:    str  = ""
     scale:                  int  = 1

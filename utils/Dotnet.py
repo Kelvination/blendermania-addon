@@ -158,7 +158,10 @@ class DotnetPlaceObjectsOnMap:
         MapSuffix: str = "_modified",
         CleanBlocks: bool = True,
         CleanItems: bool = True,
-        Env: str = "Stadium2020"):
+        Env: str = "Stadium2020",
+        MapSizeX: int = 0,
+        MapSizeY: int = 0,
+        MapSizeZ: int = 0):
             self.MapPath = MapPath
             self.Blocks = Blocks
             self.Items = Items
@@ -167,6 +170,9 @@ class DotnetPlaceObjectsOnMap:
             self.CleanBlocks = CleanBlocks
             self.CleanItems = CleanItems
             self.Env = Env
+            self.MapSizeX = MapSizeX
+            self.MapSizeY = MapSizeY
+            self.MapSizeZ = MapSizeZ
 
     def jsonable(self):
         return self.__dict__
@@ -310,6 +316,9 @@ def run_place_objects_on_map(
     clean_blocks: bool = True,
     clean_items: bool = True,
     env: str = True,
+    map_size_x: int = 0,
+    map_size_y: int = 0,
+    map_size_z: int = 0,
 ) -> DotnetExecResult:
     config_path = fix_slash(os.path.dirname(get_abs_path(map_path)))+'/map-export.json'
     with open(config_path, 'w+', encoding='utf-8') as outfile:
@@ -322,6 +331,9 @@ def run_place_objects_on_map(
                 clean_blocks,
                 clean_items,
                 env,
+                map_size_x,
+                map_size_y,
+                map_size_z,
         ), outfile, cls=ComplexEncoder, ensure_ascii=False, indent=4)
         outfile.close()
 
@@ -382,34 +394,10 @@ def run_place_mediatracker_clips_on_map(
 
 
 def _run_dotnet(command: str, payload: str) -> DotnetExecResult:
+    from .Functions import has_native_dotnet
     tm_props = get_global_props()
 
-    # Check if we can run dotnet - either Windows or Mac with Wine
-    if sys.platform != 'win32':
-        if not tm_props.CB_useWineForConversion:
-            return DotnetExecResult(
-                message="Blendermania_Dotnet.exe requires Windows or Wine/CrossOver. Enable Wine in Settings > NadeoImporter to use this feature on macOS.",
-                success=False
-            )
-
-        # Use Wine to run dotnet on Mac
-        try:
-            # Convert paths in the JSON config for Wine
-            wine_payload = _convert_json_paths_for_wine(payload)
-            cmd = _build_wine_dotnet_command(command, wine_payload)
-
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                shell=False
-            )
-        except Exception as e:
-            return DotnetExecResult(
-                message=f"Wine execution failed: {str(e)}",
-                success=False
-            )
-    else:
+    if sys.platform == 'win32':
         # Windows - run directly
         dotnet_exe = get_blendermania_dotnet_path()
         process = subprocess.Popen(args=[
@@ -417,6 +405,34 @@ def _run_dotnet(command: str, payload: str) -> DotnetExecResult:
             command,
             payload.strip('"'),
         ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    elif has_native_dotnet():
+        # macOS with native binary - run directly, no Wine needed
+        dotnet_exe = get_blendermania_dotnet_path()
+        process = subprocess.Popen(args=[
+            dotnet_exe,
+            command,
+            payload,
+        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    else:
+        # macOS/Linux without native binary - need Wine
+        if not tm_props.CB_useWineForConversion:
+            return DotnetExecResult(
+                message="Blendermania_Dotnet.exe requires Windows or Wine/CrossOver. Enable Wine in Settings > NadeoImporter to use this feature on macOS.",
+                success=False
+            )
+        try:
+            wine_payload = _convert_json_paths_for_wine(payload)
+            cmd = _build_wine_dotnet_command(command, wine_payload)
+            process = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False
+            )
+        except Exception as e:
+            return DotnetExecResult(
+                message=f"Wine execution failed: {str(e)}",
+                success=False
+            )
 
     out, err = process.communicate()
 

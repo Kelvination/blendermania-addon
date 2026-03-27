@@ -414,15 +414,23 @@ def generate_mesh_XML(item: ExportedItem) -> str:
     lightsXML   = ""
 
     
-    for obj in item.objects:
-        
-        if obj.type == "MESH":
-            for mat_slot in obj.material_slots:
-                materials.add( mat_slot.material )
-        
-        if obj.type == "LIGHT":
-            obj.name = safe_name(obj.name)
-            lights.add( obj )
+    # Use cached materials if available (geo-nodes duplicates may have been deleted)
+    if item.cached_materials:
+        for mat in item.cached_materials:
+            materials.add(mat)
+
+    for obj in (item.objects or []):
+        try:
+            if obj.type == "MESH":
+                if not item.cached_materials:
+                    for mat_slot in obj.material_slots:
+                        materials.add( mat_slot.material )
+
+            if obj.type == "LIGHT":
+                obj.name = safe_name(obj.name)
+                lights.add( obj )
+        except ReferenceError:
+            pass  # object was removed (e.g. geo-nodes cleanup)
 
 
     for mat in materials:

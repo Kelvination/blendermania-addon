@@ -186,6 +186,29 @@ def _cleanup_geonodes_for_object_export(dup: bpy.types.Object, original: bpy.typ
     bpy.data.objects.remove(dup, do_unlink=True)
 
 
+def _cache_materials_for_items(base_item, items_to_export):
+    """Snapshot material references from item.objects before geo-nodes duplicates are deleted.
+
+    generate_mesh_XML reads materials from item.objects, but those objects get
+    removed during geo-nodes cleanup.  This caches the materials so XML
+    generation still works.
+    """
+    mats = set()
+    if base_item.objects:
+        for obj in base_item.objects:
+            if obj.type == "MESH":
+                for slot in obj.material_slots:
+                    if slot.material:
+                        mats.add(slot.material)
+    cached = list(mats)
+    # apply to the base item and any scaled variants already added
+    base_item.cached_materials = cached
+    for item in items_to_export:
+        if item.fbx_path and base_item.fbx_path and \
+           item.fbx_path.replace(".fbx", "") .startswith(base_item.fbx_path.replace(".fbx", "")):
+            item.cached_materials = cached
+
+
 def _fix_uv_layers_name(objects: list[bpy.types.Object]) -> None:
     for obj in objects:
         if obj.type == "MESH" and not obj.name.startswith((
@@ -621,6 +644,7 @@ def export_collections(colls: list[bpy.types.Collection]):
         item_to_export.name = safe_name(coll.name)
         item_to_export.name_raw = coll.name
         item_to_export.objects = objs
+        item_to_export.collection = coll
         item_to_export.color_tag = coll.color_tag
         item_to_export.tm_itemxml_template = coll.tm_itemxml_template
         item_to_export.r_path = get_coll_relative_path(coll)
@@ -635,6 +659,18 @@ def export_collections(colls: list[bpy.types.Collection]):
             # re-fetch exportable objects since collection now contains applied duplicates
             objs = get_exportable_collection_objects(coll.objects)
             item_to_export.objects = objs
+
+            # process materials from geo-nodes-applied objects (may have new materials
+            # not present on originals, e.g. from Set Material nodes)
+            for obj in objs:
+                for slot in obj.material_slots:
+                    mat = slot.material
+                    if mat is None:
+                        continue
+                    if mat not in processed_materials:
+                        if is_material_exportable(mat):
+                            save_mat_props_json(mat)
+                            processed_materials.append(mat)
 
         # fix UVs and check lods
         _fix_uv_layers_name(coll.objects)
@@ -710,8 +746,10 @@ def export_collections(colls: list[bpy.types.Collection]):
         # move collection back to original position
         _move_collection_by(coll.objects, offset)
 
-        # restore original objects after geometry nodes export
+        # snapshot materials before cleanup so XML generation can use them
+        # (cleanup deletes the duplicate objects, making item.objects references invalid)
         if geonodes_pairs:
+            _cache_materials_for_items(item_to_export, items_to_export)
             _cleanup_geonodes_for_export(coll, geonodes_pairs)
 
     for obj in current_selection:
@@ -771,6 +809,7 @@ def export_objects(objects: list[bpy.types.Object]) -> None:
         item_to_export.name = safe_name(obj.name)
         item_to_export.name_raw = obj.name
         item_to_export.objects = [obj]
+        item_to_export.collection = obj.users_collection[0] if obj.users_collection else None
         item_to_export.tm_itemxml_template = obj.users_collection[0].tm_itemxml_template
         item_to_export.r_path = get_object_relative_path(obj)
         item_to_export.fbx_path = f"{export_work_path}{item_to_export.r_path}.fbx"
@@ -782,6 +821,16 @@ def export_objects(objects: list[bpy.types.Object]) -> None:
         export_obj, geonodes_original = _apply_geonodes_for_object_export(obj)
         if geonodes_original is not None:
             item_to_export.objects = [export_obj]
+
+            # process materials from geo-nodes-applied object
+            for slot in export_obj.material_slots:
+                mat = slot.material
+                if mat is None:
+                    continue
+                if mat not in processed_materials:
+                    if is_material_exportable(mat):
+                        save_mat_props_json(mat)
+                        processed_materials.append(mat)
 
         # fix UVs and check lods
         _fix_uv_layers_name([export_obj])
@@ -825,6 +874,18 @@ def export_objects(objects: list[bpy.types.Object]) -> None:
             items_to_export += _duplicate_scaled(variant_item)
 
         export_obj.location = old_loc
+
+        # cache materials before cleanup (duplicate objects will be deleted)
+        if geonodes_original is not None:
+            mats = []
+            for slot in export_obj.material_slots:
+                if slot.material:
+                    mats.append(slot.material)
+            item_to_export.cached_materials = mats
+            for it in items_to_export:
+                if it.fbx_path and item_to_export.fbx_path and \
+                   it.fbx_path.replace(".fbx", "").startswith(item_to_export.fbx_path.replace(".fbx", "")):
+                    it.cached_materials = mats
 
         # restore original object after geometry nodes export
         _cleanup_geonodes_for_object_export(export_obj, geonodes_original)

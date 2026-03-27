@@ -25,15 +25,15 @@ def _set_ST_materialAddName_when_select_link(self, context):
         self.ST_materialAddName = tm_props.ST_selectedLinkedMat
 
 
-def saveWineSettings():
-    """Save settings immediately when Wine config changes so it persists across projects"""
+def saveSettingsNow():
+    """Save settings immediately so they persist across projects and blend files"""
     try:
         from ..operators.OT_Settings import saveDefaultSettingsJSON
         saveDefaultSettingsJSON()
     except AttributeError:
         pass  # Expected during addon registration
     except Exception as e:
-        print(f"[Blendermania] Failed to save Wine settings: {e}")
+        print(f"[Blendermania] Failed to save settings: {e}")
 
 
 #? CB = CheckBox => BoolProperty
@@ -46,7 +46,7 @@ class PannelsPropertyGroup(bpy.types.PropertyGroup):
     LI_gameType                 : EnumProperty(  name="Game",    items=getGameTypes(),   update=gameTypeGotUpdated, default=GAMETYPE_TRACKMANIA2020)
     ST_nadeoIniFile_MP          : StringProperty(name="",        subtype="FILE_PATH",    update=lambda s, c: updateINI("ST_nadeoIniFile_MP"), default=defaultINI("ST_nadeoIniFile_MP"))
     ST_nadeoIniFile_TM          : StringProperty(name="",        subtype="FILE_PATH",    update=lambda s, c: updateINI("ST_nadeoIniFile_TM"), default=defaultINI("ST_nadeoIniFile_TM"))
-    ST_author                   : StringProperty(name="Author",  default="")
+    ST_author                   : StringProperty(name="Author",  default="", update=lambda s, c: saveSettingsNow())
     CB_nadeoImporterIsInstalled : BoolProperty(  name="NadeoImporter installed", default=False)
     NU_nadeoImporterDLProgress  : FloatProperty( min=0, max=100, default=0, subtype="PERCENTAGE", update=redraw_panels)
     CB_nadeoImporterDLRunning   : BoolProperty(  default=False,  update=redraw_panels)
@@ -58,7 +58,7 @@ class PannelsPropertyGroup(bpy.types.PropertyGroup):
     ST_nadeoImporter_TM_current : StringProperty("None found")
 
     # Wine/CrossOver settings for Mac
-    CB_useWineForConversion     : BoolProperty(name="Use Wine/CrossOver", default=False, description="Enable Wine or CrossOver to run NadeoImporter on macOS/Linux", update=lambda s, c: saveWineSettings())
+    CB_useWineForConversion     : BoolProperty(name="Use Wine/CrossOver", default=False, description="Enable Wine or CrossOver to run NadeoImporter on macOS/Linux", update=lambda s, c: saveSettingsNow())
     LI_wineType                 : EnumProperty(
         name="Wine Type",
         items=[
@@ -67,11 +67,11 @@ class PannelsPropertyGroup(bpy.types.PropertyGroup):
         ],
         default="CROSSOVER",
         description="Choose your Wine installation type",
-        update=lambda s, c: saveWineSettings()
+        update=lambda s, c: saveSettingsNow()
     )
-    ST_wineExePath              : StringProperty(name="Wine Path", default="/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/wine", subtype="FILE_PATH", description="Path to wine executable (CrossOver or standard Wine)", update=lambda s, c: saveWineSettings())
-    ST_wineBottleName           : StringProperty(name="Bottle Name", default="Steam", description="Name of the CrossOver bottle containing NadeoImporter", update=lambda s, c: saveWineSettings())
-    ST_wineNadeoImporterPath    : StringProperty(name="NadeoImporter Path", default="C:\\Program Files (x86)\\Steam\\steamapps\\common\\Trackmania\\NadeoImporter.exe", description="Path to NadeoImporter.exe inside the Wine environment (Windows-style path)", update=lambda s, c: saveWineSettings())
+    ST_wineExePath              : StringProperty(name="Wine Path", default="/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/wine", subtype="FILE_PATH", description="Path to wine executable (CrossOver or standard Wine)", update=lambda s, c: saveSettingsNow())
+    ST_wineBottleName           : StringProperty(name="Bottle Name", default="Steam", description="Name of the CrossOver bottle containing NadeoImporter", update=lambda s, c: saveSettingsNow())
+    ST_wineNadeoImporterPath    : StringProperty(name="NadeoImporter Path", default="C:\\Program Files (x86)\\Steam\\steamapps\\common\\Trackmania\\NadeoImporter.exe", description="Path to NadeoImporter.exe inside the Wine environment (Windows-style path)", update=lambda s, c: saveSettingsNow())
     CB_NadeoLibParseFailed      : BoolProperty("NadeoMatLib.txt parse attempt", default=False)
     LI_blenderGridSize          : EnumProperty(items=getGridSizes(),         default=3, update=apply_custom_blender_grid_size)
     LI_blenderGridSizeDivision  : EnumProperty(items=getGridDivisionSizes(), default=3, update=apply_custom_blender_grid_size)
@@ -110,6 +110,10 @@ class PannelsPropertyGroup(bpy.types.PropertyGroup):
     PT_map_object             : PointerProperty(type=MapObjectProperties)
     CB_map_clean_blocks       : BoolProperty(name="Clean existed blocks", default=False, description="Blocks are very unstable at the moment")
     CB_map_clean_items        : BoolProperty(name="Clean existed items", default=True)
+    CB_map_void_base          : BoolProperty(name="Void Base (Remove Grass)", default=False, description="Add GrassRemover blocks to remove the grass terrain. Requires Z_Backdrop/GrassRemover.Block.Gbx in your Blocks folder")
+    NU_map_size_x             : IntProperty(name="Map Size X", default=0, min=0, max=255, description="Map size X (0 = don't change). Default TM2020: 48")
+    NU_map_size_y             : IntProperty(name="Map Size Y", default=0, min=0, max=255, description="Map size Y/height (0 = don't change). Default TM2020: 255")
+    NU_map_size_z             : IntProperty(name="Map Size Z", default=0, min=0, max=255, description="Map size Z (0 = don't change). Default TM2020: 48")
     ST_map_clip_name          : StringProperty(name="", search=provide_current_map_mt_clip_names)
     # map other
     CB_map_use_grid_helper:             BoolProperty(default=False, name="Map Grid Helper",     update=on_grid_helper_toggle)
@@ -278,6 +282,40 @@ class PannelsPropertyGroup(bpy.types.PropertyGroup):
     # cars
     LI_items_cars     : EnumProperty(name="Car",     items=get_car_names())
     LI_items_triggers : EnumProperty(name="Trigger", items=getTriggerNames())
+
+    # Kinematic Pattern Generator
+    LI_kinematic_pattern: EnumProperty(
+        items=[
+            ("BURST",  "Burst",  "Copies burst outward from center"),
+            ("RING",   "Ring",   "Copies arranged in a rotating ring"),
+            ("WAVE",   "Wave",   "Copies in a line with wave motion"),
+            ("SPIRAL", "Spiral", "Copies in a helix pattern"),
+            ("GRID",   "Grid",   "Copies in a grid, all rotating"),
+            ("CUSTOM", "Custom", "User-defined expressions"),
+        ],
+        name="Pattern", default="RING"
+    )
+    NU_kinematic_pattern_count:     IntProperty(name="Count",          default=8,    min=1,   max=100)
+    NU_kinematic_pattern_radius:    FloatProperty(name="Radius",       default=16.0, min=0.1, max=256.0)
+    NU_kinematic_pattern_spacing:   FloatProperty(name="Spacing",      default=8.0,  min=0.1, max=128.0)
+    NU_kinematic_pattern_duration:  IntProperty(name="Duration (ms)",  default=5000, min=100, max=120000)
+    NU_kinematic_pattern_amplitude: FloatProperty(name="Amplitude",    default=8.0,  min=0.1, max=128.0)
+    NU_kinematic_pattern_height:    FloatProperty(name="Height",       default=32.0, min=0.1, max=256.0)
+    NU_kinematic_pattern_cols:      IntProperty(name="Columns",        default=4,    min=1,   max=20)
+    NU_kinematic_pattern_rows:      IntProperty(name="Rows",           default=4,    min=1,   max=20)
+    LI_kinematic_pattern_easing: EnumProperty(
+        items=[
+            ("None",      "None",       ""),
+            ("Linear",    "Linear",     ""),
+            ("QuadIn",    "Ease In",    ""),
+            ("QuadOut",   "Ease Out",   ""),
+            ("QuadInOut", "Ease In/Out",""),
+        ],
+        name="Easing", default="Linear"
+    )
+    ST_kinematic_pattern_expr_pos:  StringProperty(name="Position",  default="cos(angle)*16, sin(angle)*16, 0")
+    ST_kinematic_pattern_expr_rot:  StringProperty(name="Rotation",  default="0, 0, angle")
+    ST_kinematic_pattern_expr_anim: StringProperty(name="Animation", default="rot_max=360; rot_duration=5000")
 
 
 

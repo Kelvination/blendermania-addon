@@ -4,10 +4,11 @@ from bpy.types import Panel
 from bpy.types import Operator
 
 from ..operators.OT_Settings import TM_OT_Settings_OpenMessageBox
+from ..operators.OT_KinematicPreview import is_kinematic_eligible, TM_OT_KinematicPreviewPlay
 
 from ..properties.Functions import ERROR_ENUM_ID
 from ..utils.Functions import *
-from ..utils.Constants import * 
+from ..utils.Constants import *
 
 
 
@@ -547,6 +548,189 @@ class TM_PT_Items_CollectionManipulation(Panel):
         uv_row.operator("view3d.tm_edituvmap", text="",             icon=ICON_EDIT).uv_name = UV_LAYER_NAME_LIGHTMAP
         # row = col.row(align=True)
         # row.prop(tm_props, "LI_workspaces", text="")
+
+
+        # Moving Item (Kinematic)
+        # Moving Item (Kinematic)
+        # Moving Item (Kinematic)
+        col_box.separator(factor=0.5)
+        row = col_box.row(align=True)
+        row.prop(current_collection, "tm_kinematic_enabled", text="Moving Item", icon="DRIVER_ROTATIONAL_DIFFERENCE", toggle=True)
+
+        if current_collection.tm_kinematic_enabled:
+            kin_box = col_box.box()
+
+            # Warning about materials
+            warn_row = kin_box.row()
+            warn_row.alert = True
+            warn_row.scale_y = 0.6
+            warn_row.label(text="Only UV-mapped materials work!", icon="ERROR")
+            warn_row = kin_box.row()
+            warn_row.alert = True
+            warn_row.scale_y = 0.6
+            warn_row.label(text="Projected textures (customConcrete, etc) = invisible")
+
+            kin_box.separator(factor=0.3)
+
+            # Preview controls
+            preview_box = kin_box.box()
+            row = preview_box.row(align=True)
+            row.prop(current_collection, "tm_kinematic_preview_progress", text="Preview", slider=True)
+            row = preview_box.row(align=True)
+            playing = TM_OT_KinematicPreviewPlay.is_playing()
+            row.operator("view3d.tm_kinematic_preview_play",
+                         text="Pause" if playing else "Play",
+                         icon="PAUSE" if playing else "PLAY")
+            row.operator("view3d.tm_kinematic_preview_reset", text="Reset", icon="LOOP_BACK")
+
+            kin_box.separator(factor=0.3)
+
+            # Animated Parts list
+            header_row = kin_box.row()
+            header_row.label(text="Animated Parts:", icon="ARMATURE_DATA")
+
+            for obj in current_collection.all_objects:
+                if not is_kinematic_eligible(obj):
+                    continue
+
+                obj_box = kin_box.box()
+
+                # Object header row: expand toggle + name + animated toggle
+                row = obj_box.row(align=True)
+
+                if obj.tm_kinematic_animated:
+                    row.prop(obj, "tm_kinematic_expanded", text="",
+                             icon="TRIA_DOWN" if obj.tm_kinematic_expanded else "TRIA_RIGHT",
+                             emboss=False)
+
+                row.prop(obj, "tm_kinematic_animated", text=obj.name,
+                         icon="CHECKBOX_HLT" if obj.tm_kinematic_animated else "CHECKBOX_DEHLT",
+                         toggle=True)
+
+                if not obj.tm_kinematic_animated:
+                    # Show as static
+                    continue
+
+                if not obj.tm_kinematic_expanded:
+                    # Show compact summary
+                    summary_row = obj_box.row()
+                    summary_row.scale_y = 0.7
+                    rot_summary = f"Rot: {obj.tm_kinematic_rot_axis} [{obj.tm_kinematic_rot_min:.0f}, {obj.tm_kinematic_rot_max:.0f}]"
+                    summary_row.label(text=rot_summary, icon="DRIVER_ROTATIONAL_DIFFERENCE")
+                    if obj.tm_kinematic_trans_enabled:
+                        summary_row = obj_box.row()
+                        summary_row.scale_y = 0.7
+                        trans_summary = f"Trans: {obj.tm_kinematic_trans_axis} [{obj.tm_kinematic_trans_min:.1f}, {obj.tm_kinematic_trans_max:.1f}]"
+                        summary_row.label(text=trans_summary, icon="ORIENTATION_LOCAL")
+                    continue
+
+                # Expanded: full rotation + translation settings
+                # Rotation
+                rot_box = obj_box.box()
+                row = rot_box.row(align=True)
+                row.label(text="Rotation", icon="DRIVER_ROTATIONAL_DIFFERENCE")
+                row.prop(obj, "tm_kinematic_rot_stages", text="Stages")
+                row = rot_box.row(align=True)
+                row.prop(obj, "tm_kinematic_rot_axis", text="Axis", expand=True)
+                row = rot_box.row(align=True)
+                split = row.split(factor=0.5)
+                split.prop(obj, "tm_kinematic_rot_min", text="Min Angle")
+                split.prop(obj, "tm_kinematic_rot_max", text="Max Angle")
+                for i in range(obj.tm_kinematic_rot_stages):
+                    row = rot_box.row(align=True)
+                    split = row.split(factor=0.08)
+                    split.label(text=f"{i+1}")
+                    inner = split.row(align=True)
+                    inner.prop(obj, f"tm_kinematic_rot_s{i}_duration", text="ms")
+                    inner.prop(obj, f"tm_kinematic_rot_s{i}_easing", text="")
+                    inner.prop(obj, f"tm_kinematic_rot_s{i}_reverse", text="", icon="LOOP_BACK", toggle=True)
+
+                obj_box.separator(factor=0.3)
+
+                # Translation
+                trans_box = obj_box.box()
+                row = trans_box.row(align=True)
+                row.prop(obj, "tm_kinematic_trans_enabled", text="Translation", icon="ORIENTATION_LOCAL", toggle=True)
+                if obj.tm_kinematic_trans_enabled:
+                    row.prop(obj, "tm_kinematic_trans_stages", text="Stages")
+
+                if obj.tm_kinematic_trans_enabled:
+                    row = trans_box.row(align=True)
+                    row.prop(obj, "tm_kinematic_trans_axis", text="Axis", expand=True)
+                    row = trans_box.row(align=True)
+                    split = row.split(factor=0.5)
+                    split.prop(obj, "tm_kinematic_trans_min", text="Min")
+                    split.prop(obj, "tm_kinematic_trans_max", text="Max")
+                    for i in range(obj.tm_kinematic_trans_stages):
+                        row = trans_box.row(align=True)
+                        split = row.split(factor=0.08)
+                        split.label(text=f"{i+1}")
+                        inner = split.row(align=True)
+                        inner.prop(obj, f"tm_kinematic_trans_s{i}_duration", text="ms")
+                        inner.prop(obj, f"tm_kinematic_trans_s{i}_easing", text="")
+                        inner.prop(obj, f"tm_kinematic_trans_s{i}_reverse", text="", icon="LOOP_BACK", toggle=True)
+
+            # Pattern Generator
+            kin_box.separator(factor=0.5)
+            pat_box = kin_box.box()
+            pat_box.label(text="Pattern Generator", icon="PARTICLES")
+
+            active_obj = bpy.context.active_object
+            if active_obj and active_obj.type == "MESH":
+                row = pat_box.row()
+                row.label(text=f"Source: {active_obj.name}", icon="OBJECT_DATA")
+            else:
+                row = pat_box.row()
+                row.alert = True
+                row.label(text="Select a mesh object", icon="ERROR")
+
+            row = pat_box.row()
+            row.prop(tm_props, "LI_kinematic_pattern", text="Pattern")
+
+            row = pat_box.row()
+            row.prop(tm_props, "NU_kinematic_pattern_count", text="Count")
+
+            pattern = tm_props.LI_kinematic_pattern
+
+            # Show pattern-specific parameters
+            if pattern in ("BURST", "RING", "SPIRAL"):
+                row = pat_box.row()
+                row.prop(tm_props, "NU_kinematic_pattern_radius", text="Radius")
+
+            if pattern in ("WAVE", "GRID"):
+                row = pat_box.row()
+                row.prop(tm_props, "NU_kinematic_pattern_spacing", text="Spacing")
+
+            if pattern == "WAVE":
+                row = pat_box.row()
+                row.prop(tm_props, "NU_kinematic_pattern_amplitude", text="Amplitude")
+
+            if pattern == "SPIRAL":
+                row = pat_box.row()
+                row.prop(tm_props, "NU_kinematic_pattern_height", text="Height")
+
+            if pattern == "GRID":
+                row = pat_box.row(align=True)
+                row.prop(tm_props, "NU_kinematic_pattern_cols", text="Cols")
+                row.prop(tm_props, "NU_kinematic_pattern_rows", text="Rows")
+
+            if pattern != "CUSTOM":
+                row = pat_box.row()
+                row.prop(tm_props, "NU_kinematic_pattern_duration", text="Duration (ms)")
+
+                row = pat_box.row()
+                row.prop(tm_props, "LI_kinematic_pattern_easing", text="Easing")
+
+            if pattern == "CUSTOM":
+                col = pat_box.column(align=True)
+                col.prop(tm_props, "ST_kinematic_pattern_expr_pos", text="Pos")
+                col.prop(tm_props, "ST_kinematic_pattern_expr_rot", text="Rot")
+                col.prop(tm_props, "ST_kinematic_pattern_expr_anim", text="Anim")
+
+            row = pat_box.row(align=True)
+            row.scale_y = 1.3
+            row.operator("view3d.tm_kinematic_pattern_generate", text="Generate", icon="PLAY")
+            row.operator("view3d.tm_kinematic_pattern_clear", text="Clear", icon="TRASH")
 
 
         layout.separator(factor=2)

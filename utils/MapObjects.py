@@ -264,18 +264,39 @@ def _create_dotnet_item_from_obj(obj: bpy.types.Object, doc_path: str, loc=None,
     )
 
 
-def _collect_geonodes_instances(obj: bpy.types.Object, depsgraph) -> list:
+def _build_instance_map(depsgraph) -> dict:
+    """Build a lookup dict from depsgraph, mapping original objects to (pos, rot) lists.
+
+    Extracts transform data immediately since DepsgraphObjectInstance references
+    become invalid after iteration. Indexes by both the instanced object and its
+    parent so geometry nodes setups that reference either will be found.
+    """
+    instance_map = {}
+    for instance in depsgraph.object_instances:
+        if not instance.is_instance:
+            continue
+        matrix = instance.matrix_world
+        transform = (matrix.to_translation(), matrix.to_euler())
+        obj_key = instance.object.original
+        parent_key = instance.parent.original if instance.parent else None
+        if obj_key not in instance_map:
+            instance_map[obj_key] = []
+        instance_map[obj_key].append(transform)
+        if parent_key and parent_key != obj_key:
+            if parent_key not in instance_map:
+                instance_map[parent_key] = []
+            instance_map[parent_key].append(transform)
+    return instance_map
+
+
+def _collect_geonodes_instances(obj: bpy.types.Object, instance_map: dict) -> list:
     """Collect instances produced by Geometry Nodes modifiers on an object.
 
     Returns a list of (position, rotation) tuples for each instance.
+    Uses a pre-built instance_map for O(1) lookup instead of scanning the full depsgraph.
     """
-    instances = []
-    for instance in depsgraph.object_instances:
-        if instance.is_instance and instance.parent and instance.parent.original == obj:
-            matrix = instance.matrix_world
-            pos = matrix.to_translation()
-            rot = matrix.to_euler()
-            instances.append((pos, rot))
+    instances = instance_map.get(obj, [])
+    debug(f"Geonodes instances for {obj.name}: {len(instances)}")
     return instances
 
 
@@ -304,13 +325,14 @@ def export_map_collection() -> DotnetExecResult:
         map_suffix = "_modified"
 
     depsgraph = bpy.context.evaluated_depsgraph_get()
+    instance_map = _build_instance_map(depsgraph)
 
     for obj in map_coll.all_objects:
         obj:bpy.types.Object = obj
 
         # Handle Geometry Nodes instances (check first — takes priority over collection instances)
         if _has_geonodes_modifier(obj) and obj.tm_map_object_kind == MAP_OBJECT_ITEM:
-            instances = _collect_geonodes_instances(obj, depsgraph)
+            instances = _collect_geonodes_instances(obj, instance_map)
             if instances:
                 for pos, rot in instances:
                     dotnet_items.append(_create_dotnet_item_from_obj(obj, doc_path, loc=pos, rot=rot))
@@ -331,6 +353,17 @@ def export_map_collection() -> DotnetExecResult:
                 Position=DotnetInt3(int(int(obj.location[1])/32), int(int(obj.location[2])/32)+9, int(int(obj.location[0])/32)),
             ))
 
+    # Void Base: add 48x48 GrassRemover block grid to remove grass terrain
+    if tm_props.CB_map_void_base:
+        grass_block_name = r"Z_Backdrop\GrassRemover.Block.Gbx_CustomBlock"
+        for x in range(48):
+            for z in range(48):
+                dotnet_blocks.append(DotnetBlock(
+                    Name=grass_block_name,
+                    Direction=0,  # North
+                    Position=DotnetInt3(x, 9, z),
+                ))
+
     return run_place_objects_on_map(
         map_path,
         dotnet_blocks,
@@ -340,6 +373,9 @@ def export_map_collection() -> DotnetExecResult:
         clean_blocks,
         clean_items,
         env,
+        tm_props.NU_map_size_x,
+        tm_props.NU_map_size_y,
+        tm_props.NU_map_size_z,
     )
 
 

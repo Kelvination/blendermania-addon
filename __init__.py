@@ -17,7 +17,7 @@ bl_info = {
     "author"        : "skyslide22, juice & schadocalex",
     "description"   : "Makes creating objects for Trackmania more easy and fun!",
     "blender"       : (5, 0, 0),
-    "version"       : (4, 4, 1),
+    "version"       : (4, 5, 4),
     "location"      : "View3D",
     "warning"       : "",
     "category"      : "Generic",
@@ -84,6 +84,15 @@ from .operators.OT_Textures                import *
 from .operators.OT_Imports                 import * 
 from .operators.OT_VisibilitySelection     import *
 from .operators.OT_EditorTrails            import *
+from .operators.OT_KinematicPreview        import (
+    TM_OT_KinematicPreviewReset,
+    TM_OT_KinematicPreviewPlay,
+    on_preview_progress_update,
+)
+from .operators.OT_KinematicPatternGen     import (
+    TM_OT_KinematicPatternGenerate,
+    TM_OT_KinematicPatternClear,
+)
 from .operators.OT_ColorVariants           import (
     TM_OT_ColorVariant_Add,
     TM_OT_ColorVariant_Remove,
@@ -271,6 +280,14 @@ classes = (
     TM_PT_UIEditorTrails,
     TM_OT_EditorTrails_ImportJSON,
 
+    # kinematic preview
+    TM_OT_KinematicPreviewReset,
+    TM_OT_KinematicPreviewPlay,
+
+    # kinematic pattern generator
+    TM_OT_KinematicPatternGenerate,
+    TM_OT_KinematicPatternClear,
+
     # util
     OT_UIWikiLink,
     TM_OT_Settings_OpenMessageBox,
@@ -322,6 +339,46 @@ def register():
 
     # collections
     bpy.types.Collection.tm_itemxml_template = StringProperty(name="Item XML Template", default="")
+
+    # Kinematic (moving item) properties
+    # Collection-level: master toggle + preview scrubber
+    bpy.types.Collection.tm_kinematic_enabled = BoolProperty(name="Moving Item", default=False)
+    bpy.types.Collection.tm_kinematic_preview_progress = FloatProperty(
+        name="Preview Progress",
+        default=0.0, min=0.0, max=1.0,
+        subtype="FACTOR",
+        update=on_preview_progress_update,
+    )
+
+    # Per-object kinematic animation properties
+    _kin_easing_items = [
+        ("None","None","No animation"),
+        ("Linear","Linear","Constant speed"),
+        ("QuadIn","Ease In","Accelerate"),
+        ("QuadOut","Ease Out","Decelerate"),
+        ("QuadInOut","Ease In/Out","Accelerate then decelerate"),
+    ]
+    bpy.types.Object.tm_kinematic_animated = BoolProperty(name="Animated Part", default=False)
+    bpy.types.Object.tm_kinematic_expanded = BoolProperty(name="Expand Settings", default=False)
+    # Rotation
+    bpy.types.Object.tm_kinematic_rot_axis = EnumProperty(items=[("X","X",""),("Y","Y",""),("Z","Z","")], name="Rotation Axis", default="Y")
+    bpy.types.Object.tm_kinematic_rot_min = FloatProperty(name="Angle Min (deg)", default=0)
+    bpy.types.Object.tm_kinematic_rot_max = FloatProperty(name="Angle Max (deg)", default=360)
+    bpy.types.Object.tm_kinematic_rot_stages = IntProperty(name="Rotation Stages", default=1, min=1, max=4)
+    # Translation
+    bpy.types.Object.tm_kinematic_trans_enabled = BoolProperty(name="Enable Translation", default=False)
+    bpy.types.Object.tm_kinematic_trans_axis = EnumProperty(items=[("X","X",""),("Y","Y",""),("Z","Z","")], name="Translation Axis", default="Y")
+    bpy.types.Object.tm_kinematic_trans_min = FloatProperty(name="Trans Min", default=0)
+    bpy.types.Object.tm_kinematic_trans_max = FloatProperty(name="Trans Max", default=8)
+    bpy.types.Object.tm_kinematic_trans_stages = IntProperty(name="Translation Stages", default=2, min=1, max=4)
+    # 4 rotation + 4 translation stage properties (per-object)
+    for i in range(4):
+        setattr(bpy.types.Object, f"tm_kinematic_rot_s{i}_easing", EnumProperty(items=_kin_easing_items, name=f"Rot Stage {i+1} Easing", default="Linear"))
+        setattr(bpy.types.Object, f"tm_kinematic_rot_s{i}_duration", IntProperty(name=f"Rot Stage {i+1} Duration (ms)", default=3000, min=0, max=120000))
+        setattr(bpy.types.Object, f"tm_kinematic_rot_s{i}_reverse", BoolProperty(name=f"Rot Stage {i+1} Reverse", default=False))
+        setattr(bpy.types.Object, f"tm_kinematic_trans_s{i}_easing", EnumProperty(items=_kin_easing_items, name=f"Trans Stage {i+1} Easing", default="Linear"))
+        setattr(bpy.types.Object, f"tm_kinematic_trans_s{i}_duration", IntProperty(name=f"Trans Stage {i+1} Duration (ms)", default=3000, min=0, max=120000))
+        setattr(bpy.types.Object, f"tm_kinematic_trans_s{i}_reverse", BoolProperty(name=f"Trans Stage {i+1} Reverse", default=(i == 1)))
 
     # material extra props
     bpy.types.Material.gameType         = EnumProperty(         name="Game",                default=0, items=getGameTypes())
